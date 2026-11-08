@@ -110,11 +110,9 @@ class ArcamFmjCoordinator(DataUpdateCoordinator[None]):
     ) -> None:
         """Set device information discovered before platform setup."""
         self.model = model
-        self.device_info.update(
-            model=model,
-            hw_version=revision,
-            sw_version=software_version,
-        )
+        self.device_info["model"] = model
+        self.device_info["hw_version"] = revision
+        self.device_info["sw_version"] = software_version
         if system_model is not None:
             self.device_info["model_id"] = system_model
 
