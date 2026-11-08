@@ -1,7 +1,9 @@
 """Tests for the Arcam FMJ config entry setup."""
 
 from asyncio import CancelledError, StreamReader, StreamWriter
+from collections.abc import Mapping
 from contextlib import suppress
+from typing import Any
 from unittest.mock import Mock, patch
 
 from arcam.fmj.commands import (
@@ -31,6 +33,18 @@ class _CleanDisconnectServer(Server):
     async def process(self, reader: StreamReader, writer: StreamWriter) -> None:
         with suppress(ConnectionFailed):
             await super().process(reader, writer)
+
+
+class _MappingUpdateDeviceInfo(dict[str, Any]):
+    """Device info accepting field updates through a mapping, as since core 2026.11.
+
+    Core 2026.11 replaced the device info ``TypedDict`` with a dataclass whose
+    ``update()`` takes a mapping only, so keyword updates raise ``TypeError``.
+    Remove this once the test home assistant is new enough to provide it.
+    """
+
+    def update(self, other: Mapping[str, Any], /) -> None:  # type: ignore[override]
+        super().update(other)
 
 
 async def test_client_retries_connection_error(
@@ -100,6 +114,37 @@ async def test_system_model_device_information(
         )
         is None
     )
+
+
+@pytest.mark.parametrize("device_model", ["SA30"], indirect=True)
+async def test_device_metadata_with_mapping_update_device_info(
+    hass: HomeAssistant,
+    device_registry: dr.DeviceRegistry,
+    mock_config_entry: MockConfigEntry,
+    state_1: Mock,
+    client: Mock,
+) -> None:
+    """Test discovered device metadata against core 2026.11 device info."""
+
+    with (
+        patch(
+            "custom_components.arcam_fmj.coordinator.DeviceInfo",
+            _MappingUpdateDeviceInfo,
+        ),
+        patch("custom_components.arcam_fmj.Client", return_value=client),
+        patch("custom_components.arcam_fmj.coordinator.State", return_value=state_1),
+    ):
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+        await hass.async_block_till_done()
+
+    device = device_registry.async_get_device_by_identifier(
+        (DOMAIN, MOCK_UUID), mock_config_entry.entry_id
+    )
+    assert device is not None
+    assert device.model == "SA30"
+    assert device.model_id == "SA30 system model"
+    assert device.hw_version == MOCK_DEVICE_REVISION
+    assert device.sw_version == MOCK_SOFTWARE_VERSION
 
 
 @pytest.mark.parametrize("device_model", [None], indirect=True)
